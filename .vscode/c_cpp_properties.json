@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "",
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "includePath": [
+                "/home/helei/catkin_avoidance/devel/include/**",
+                "/opt/ros/kinetic/include/**",
+                "/home/helei/catkin_avoidance/src/avoidance/avoidance/include/**",
+                "/home/helei/catkin_ws_rl/src/explainable_rl_ros/include/**",
+                "/home/helei/catkin_avoidance/src/avoidance/global_planner/include/**",
+                "/home/helei/catkin_avoidance/src/avoidance/local_planner/include/**",
+                "/home/helei/catkin_avoidance/src/avoidance/safe_landing_planner/include/**",
+                "/usr/include/**"
+            ],
+            "name": "ROS",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/opt/gcc-arm-none-eabi-7-2017-q4-major/bin/arm-none-eabi-gcc",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++14"
+        }
+    ],
+    "version": 4
+}
