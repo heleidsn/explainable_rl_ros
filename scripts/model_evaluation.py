@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2020-08-29 14:51:26
-LastEditTime: 2020-08-31 22:56:01
+LastEditTime: 2020-08-31 23:20:36
 LastEditors: Please set LastEditors
 Description: model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -184,14 +184,17 @@ class ModelEvalNode():
 # functions
 
     def get_obs(self):
-        image = self._depth_image_gray.copy() # TODO: check image format. Now is 0-black near 255-wight far
+        image = self._depth_image_gray.copy() # Note: check image format. Now is 0-black near 255-wight far
+
+        # transfer image to image obs according to 0-far  255-nears
+        image_obs = 255 - image
 
         state_feature_array = np.zeros((self.image_height, self.image_width))
 
         state_feature = self._get_state_feature(self._local_odometry, self._goal_pose)
         state_feature_array[0, 0:self.state_feature_length] = state_feature
 
-        image_with_state = np.array([image, state_feature_array])
+        image_with_state = np.array([image_obs, state_feature_array])
         image_with_state = image_with_state.swapaxes(0, 2)
         image_with_state = image_with_state.swapaxes(0, 1)
 
