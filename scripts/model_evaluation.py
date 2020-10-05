@@ -4,7 +4,7 @@ Author: Lei He
 Date: 2020-08-29 14:51:26
 LastEditTime: 2020-08-31 23:20:36
 LastEditors: Please set LastEditors
-Description: model evaluation in ros environment
+Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
 '''
 import warnings
