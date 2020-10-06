@@ -38,7 +38,12 @@ class ModelEvalNode():
         self.bridge = CvBridge()
 
         self.cfg = ConfigParser()
-        self.cfg.read('/home/helei/catkin_ws_rl/src/explainable_rl_ros/configs/config.ini')
+
+        # print('current path: ', sys.path)
+        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/configs/config.ini'
+        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/test_model.zip'
+        
+        self.cfg.read(config_path)
         self.set_config(self.cfg)
 
         self.set_sub_pub()
@@ -50,17 +55,17 @@ class ModelEvalNode():
         self._depth_image_gray = np.zeros((self.image_height, self.image_width))
 
         # load model
-        # print(sys.path)
-        self.model = TD3.load('/home/helei/catkin_ws_rl/src/explainable_rl_ros/scripts/models/test_model')
+        self.model = TD3.load(model_path)
         print('model load success')
 
         self._check_all_systems_ready()
        
         while not rospy.is_shutdown():
-            self.check_sensor_data()
+            # self.check_sensor_data()
             obs = self.get_obs()
             action_real, _ = self.model.predict(obs)
             self.set_action(action_real)
+            print(action_real)
             
             if self.control_rate:
                 rospy.sleep(1 / self.control_rate)
@@ -91,14 +96,14 @@ class ModelEvalNode():
         self.max_vel_z = cfg.getfloat('uav_model', 'max_vel_z')
         self.max_vel_yaw_rad = math.radians(cfg.getfloat('uav_model', 'max_vel_yaw_deg'))
         
-
     def set_sub_pub(self):
         # --------------Subscribers-------------------
         # state
         self._mavros_state = State()
         rospy.Subscriber('mavros/state', State, callback=self._stateCb, queue_size=10)
         # depth image
-        rospy.Subscriber('/camera/depth/image_raw', Image, callback=self._imageCb, queue_size=10)
+        rospy.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, callback=self._imageCb, queue_size=10)
+        # rospy.Subscriber('/camera/depth/image_rect_raw', Image, callback=self._imageCb, queue_size=10)
         # local odometry
         self._local_odometry = Odometry()
         rospy.Subscriber('/mavros/local_position/odom', Odometry, callback=self._local_odomCb, queue_size=10)
@@ -112,7 +117,6 @@ class ModelEvalNode():
         self._local_pose_setpoint_pub = rospy.Publisher('/mavros/setpoint_position/local',PoseStamped, queue_size=10)
         self._setpoint_marker_pub = rospy.Publisher('network/setpoint', Marker, queue_size=10)
 
-
 # call back functions
     def _stateCb(self, msg):
         self._mavros_state = msg
@@ -122,19 +126,31 @@ class ModelEvalNode():
 
     def _imageCb(self, msg):
         depth_image_msg = msg
+
+        # get depth image in mm
         try:
             # tranfer image from ros msg to opencv image encode F32C1
-            cv_image = self.bridge.imgmsg_to_cv2(depth_image_msg, desired_encoding='passthrough')
+            cv_image = self.bridge.imgmsg_to_cv2(depth_image_msg, desired_encoding=depth_image_msg.encoding)
         except CvBridgeError as e:
             print(e)
 
         (rows,cols) = cv_image.shape
+        # print('Depth at center({:d}, {:d}): {:.2f}(mm)'.format(int(rows/2), int(cols/2), cv_image[int(rows/2), int(cols/2)]))
         image = np.array(cv_image, dtype=np.float32)
-        self._depth_image_meter = np.copy(image)
+
+        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_AREA)
+
+        image_small_meter = image_small / 1000
+
+        image_small_meter[image_small_meter == 0] = self.max_depth_meter
+        self._depth_image_meter = np.copy(image_small_meter)
         # deal with nan
-        image[np.isnan(image)] = self.max_depth_meter
+        # image[np.isnan(image)] = self.max_depth_meter
+
+        # deal with 0
+
         # transfer to uint8
-        image_gray = image / self.max_depth_meter * 255
+        image_gray = self._depth_image_meter / self.max_depth_meter * 255
         image_gray_int = image_gray.astype(np.uint8)
         self._depth_image_gray = np.copy(image_gray_int)
 
@@ -153,13 +169,14 @@ class ModelEvalNode():
 
     def _check_all_sensors_ready(self):
         rospy.logdebug("CHECK ALL SENSORS CONNECTION:")
+        print('check sensors')
         self._check_depth_image_ready()
         self._check_local_odometry_ready()
-        self._check_local_odometry_ready()
+        print('sensors data ready')
         rospy.logdebug("All Sensors CONNECTED and READY!")
 
     def _check_depth_image_ready(self):
-        self._current_pose = None
+        self._depth_image_meter = None
         rospy.logdebug("Waiting for /camera/depth/image_raw to be READY...")
         while self._depth_image_meter is None and not rospy.is_shutdown():
             try:
