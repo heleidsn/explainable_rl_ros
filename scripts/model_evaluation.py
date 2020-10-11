@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2020-08-29 14:51:26
-LastEditTime: 2020-08-31 23:20:36
+LastEditTime: 2020-10-11 12:27:35
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -34,6 +34,7 @@ from scripts_final.td3 import TD3
 
 class ModelEvalNode():
     def __init__(self):
+        rospy.logdebug('Start init ModelEvalNode...')
         
         self.bridge = CvBridge()
 
@@ -41,31 +42,38 @@ class ModelEvalNode():
 
         # print('current path: ', sys.path)
         config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/configs/config.ini'
-        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/test_model.zip'
+        # model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/test_model.zip'
+        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/2020_10_06_00_07_same with i5_200000.zip'
+        self.image_source = 'gazebo'   # choose image source. gazebo or realsense
         
         self.cfg.read(config_path)
         self.set_config(self.cfg)
 
         self.set_sub_pub()
     
+        self.goal_height = 5
         # set goal pose
-        self._set_goal_pose(20, 0, 5)
+        self._set_goal_pose(20, 0, self.goal_height)
 
         self._depth_image_meter = np.zeros((self.image_height, self.image_width))
         self._depth_image_gray = np.zeros((self.image_height, self.image_width))
 
+        self.action_last = np.array([0, 0, 0])
+        self.filter_alpha = 0.5
+
         # load model
         self.model = TD3.load(model_path)
-        print('model load success')
+        rospy.logdebug('model load success')
 
         self._check_all_systems_ready()
        
+        rospy.logdebug('control start...')
         while not rospy.is_shutdown():
             # self.check_sensor_data()
             obs = self.get_obs()
             action_real, _ = self.model.predict(obs)
             self.set_action(action_real)
-            print(action_real)
+            # print(action_real)
             
             if self.control_rate:
                 rospy.sleep(1 / self.control_rate)
@@ -74,6 +82,7 @@ class ModelEvalNode():
 
     def set_config(self, cfg):
         self.control_rate = cfg.getint('gazebo', 'control_rate')
+        rospy.logdebug('control_rate: {:d}'.format(self.control_rate))
 
         self.goal_distance = 0
         self.max_depth_meter = cfg.getfloat('gazebo', 'max_depth_meter')
@@ -101,21 +110,35 @@ class ModelEvalNode():
         # state
         self._mavros_state = State()
         rospy.Subscriber('mavros/state', State, callback=self._stateCb, queue_size=10)
-        # depth image
-        rospy.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, callback=self._imageCb, queue_size=10)
-        # rospy.Subscriber('/camera/depth/image_rect_raw', Image, callback=self._imageCb, queue_size=10)
+
+        # get depth image from different sources
+        if self.image_source == 'gazebo':
+            rospy.Subscriber('/camera/depth/image_raw', Image, callback=self._imageCb, queue_size=10)
+        elif self.image_source == 'realsense':
+            rospy.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, callback=self._imageCb, queue_size=10)
+        else:
+            rospy.logerr("image_source error")
+        
         # local odometry
         self._local_odometry = Odometry()
         rospy.Subscriber('/mavros/local_position/odom', Odometry, callback=self._local_odomCb, queue_size=10)
 
+        # clicked goal in rviz
+        self._clicked_goal_pose = PoseStamped()
+        rospy.Subscriber('/move_base_simple/goal', PoseStamped, callback=self._click_goalCb, queue_size=1)
+
         # --------------Publishers--------------------
-        # current goal position 
+        # current goal position
         self._goal_pose = PoseStamped()
-        self._goal_pose_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
+        self._goal_pose_pub = rospy.Publisher('/network/goal', PoseStamped, queue_size=10)
+        self._goal_pose_marker_pub = rospy.Publisher('network/marker_goal', Marker, queue_size=10)
 
         # control command
         self._local_pose_setpoint_pub = rospy.Publisher('/mavros/setpoint_position/local',PoseStamped, queue_size=10)
-        self._setpoint_marker_pub = rospy.Publisher('network/setpoint', Marker, queue_size=10)
+        self._setpoint_marker_pub = rospy.Publisher('network/marker_pose_setpoint', Marker, queue_size=10)
+
+        # image
+        self._depth_image_obs_input = rospy.Publisher('network/depth_image_input', Image, queue_size=10)
 
 # call back functions
     def _stateCb(self, msg):
@@ -137,25 +160,45 @@ class ModelEvalNode():
         (rows,cols) = cv_image.shape
         # print('Depth at center({:d}, {:d}): {:.2f}(mm)'.format(int(rows/2), int(cols/2), cv_image[int(rows/2), int(cols/2)]))
         image = np.array(cv_image, dtype=np.float32)
+        np.save('1-ori_image_msg', image)
 
         image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_AREA)
 
-        image_small_meter = image_small / 1000
-
-        image_small_meter[image_small_meter == 0] = self.max_depth_meter
-        self._depth_image_meter = np.copy(image_small_meter)
+        if self.image_source == 'gazebo':
+            self._depth_image_meter = np.copy(image_small)
+            self.max_depth_meter = 18
+        elif self.image_source == 'realsense':
+            image_small_meter = image_small / 1000
+            image_small_meter[image_small_meter == 0] = self.max_depth_meter
+            self._depth_image_meter = np.copy(image_small_meter)
+        else:
+            rospy.logerr('image source error')
         # deal with nan
         # image[np.isnan(image)] = self.max_depth_meter
 
         # deal with 0
 
         # transfer to uint8
+        np.save('2-depth_image_meter', self._depth_image_meter)
         image_gray = self._depth_image_meter / self.max_depth_meter * 255
         image_gray_int = image_gray.astype(np.uint8)
         self._depth_image_gray = np.copy(image_gray_int)
+        np.save('3-depth_image_gray', self._depth_image_gray)
+
+        image_msg = self.bridge.cv2_to_imgmsg(self._depth_image_gray)
+        self._depth_image_obs_input.publish(image_msg)
 
     def _local_odomCb(self, msg):
         self._local_odometry = msg
+
+    def _click_goalCb(self, msg):
+        self._clicked_goal_pose = msg
+        goal_x = self._clicked_goal_pose.pose.position.x
+        goal_y = self._clicked_goal_pose.pose.position.y
+        # goal_z = self._clicked_goal_pose.pose.position.z
+        goal_z = self.goal_height
+        rospy.logdebug('recieved clicked goal pose: {:.2f} {:.2f} {:.2f}'.format(goal_x, goal_y, goal_z))
+        self._set_goal_pose(goal_x, goal_y, goal_z)
 
 # check system 
     def _check_all_systems_ready(self):
@@ -169,10 +212,10 @@ class ModelEvalNode():
 
     def _check_all_sensors_ready(self):
         rospy.logdebug("CHECK ALL SENSORS CONNECTION:")
-        print('check sensors')
+        # print('check sensors')
         self._check_depth_image_ready()
         self._check_local_odometry_ready()
-        print('sensors data ready')
+        # print('sensors data ready')
         rospy.logdebug("All Sensors CONNECTED and READY!")
 
     def _check_depth_image_ready(self):
@@ -197,7 +240,7 @@ class ModelEvalNode():
                 rospy.logdebug("Current /mavros/local_position/odom not ready, retrying for getting local odom")
         return self._local_odometry
 
-    
+
 # functions
 
     def get_obs(self):
@@ -225,13 +268,17 @@ class ModelEvalNode():
         generate control command from action
         action_real: forward speed, climb speed, yaw speed
         '''
+
+        # test1: use first order low pass filter to actions
+        action_smooth = self.filter_alpha * action + (1 - self.filter_alpha) * self.action_last
+        self.action_last = action_smooth
         # get yaw and yaw setpoint 
         current_yaw = self.get_current_yaw()
-        yaw_speed = action[2]
+        yaw_speed = action_smooth[2]
         yaw_setpoint = current_yaw + yaw_speed
 
         # transfer dx dy from body frame to local frame
-        dx_body = action[0]
+        dx_body = action_smooth[0] / 4
         dy_body = 0
         dx_local, dy_local = self.point_transfer(dx_body, dy_body, -yaw_setpoint)
 
@@ -239,7 +286,8 @@ class ModelEvalNode():
         self._current_pose = self._local_odometry.pose
         pose_setpoint.pose.position.x = self._current_pose.pose.position.x + dx_local
         pose_setpoint.pose.position.y = self._current_pose.pose.position.y + dy_local
-        pose_setpoint.pose.position.z = self._current_pose.pose.position.z + action[1]
+        # pose_setpoint.pose.position.z = self._current_pose.pose.position.z + action_smooth[1]
+        pose_setpoint.pose.position.z = self._goal_pose.pose.position.z
 
         orientation_setpoint = quaternion_from_euler(0, 0, yaw_setpoint)
         pose_setpoint.pose.orientation.x = orientation_setpoint[0]
@@ -247,29 +295,58 @@ class ModelEvalNode():
         pose_setpoint.pose.orientation.z = orientation_setpoint[2]
         pose_setpoint.pose.orientation.w = orientation_setpoint[3]
         
-        marker_network_setpoint = Marker()
-        marker_network_setpoint.header.stamp = rospy.Time.now()
-        marker_network_setpoint.header.frame_id = 'local_origin'
-        marker_network_setpoint.type = Marker.SPHERE
-        marker_network_setpoint.action = Marker.ADD
-        marker_network_setpoint.pose.position = pose_setpoint.pose.position
-        marker_network_setpoint.pose.orientation.x = 0.0
-        marker_network_setpoint.pose.orientation.y = 0.0
-        marker_network_setpoint.pose.orientation.z = 0.0
-        marker_network_setpoint.pose.orientation.w = 1.0
-        marker_network_setpoint.scale.x = 0.3
-        marker_network_setpoint.scale.y = 0.3
-        marker_network_setpoint.scale.z = 0.3
-        marker_network_setpoint.color.a = 0.8
-        marker_network_setpoint.color.r = 0.0
-        marker_network_setpoint.color.g = 0.0
-        marker_network_setpoint.color.b = 0.0
-
         self._local_pose_setpoint_pub.publish(pose_setpoint)
-        self._setpoint_marker_pub.publish(marker_network_setpoint)
-    
+
+        # publish visualization markers
+        self.publish_marker_setpoint_pose(pose_setpoint)
+        # print(self._goal_pose)
+        self.publish_marker_goal_pose(self._goal_pose)
 
 # utils
+
+    def publish_marker_goal_pose(self, goal_pose):
+        # publish goal pose marker
+        marker = Marker()
+        marker.header.stamp = rospy.Time.now()
+        marker.header.frame_id = 'local_origin'
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position = goal_pose.pose.position
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 1.0
+        marker.scale.y = 1.0
+        marker.scale.z = 1.0
+        marker.color.a = 0.8
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+
+        self._goal_pose_marker_pub.publish(marker)
+
+    def publish_marker_setpoint_pose(self, pose_setpoint):
+        
+        marker = Marker()
+        marker.header.stamp = rospy.Time.now()
+        marker.header.frame_id = 'local_origin'
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position = pose_setpoint.pose.position
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.3
+        marker.scale.y = 0.3
+        marker.scale.z = 0.3
+        marker.color.a = 0.8
+        marker.color.r = 0.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+
+        self._setpoint_marker_pub.publish(marker)
 
     def _get_state_feature(self, current_odom, goal_pose):
         '''
@@ -328,13 +405,17 @@ class ModelEvalNode():
         return yaw_error
 
     def _set_goal_pose(self, x, y, z):
+
+        # publish goal pose
         self._goal_pose.pose.position.x = x
         self._goal_pose.pose.position.y = y
         self._goal_pose.pose.position.z = z
 
-        self.goal_distance = math.sqrt(pow(x, 2) + pow(y, 2))
-
         self._goal_pose_pub.publish(self._goal_pose)
+        rospy.logdebug('set goal pose to {:.2f} {:.2f} {:.2f}'.format(x, y, z))
+
+        # update goal distance
+        self.goal_distance = math.sqrt(pow(x, 2) + pow(y, 2))
 
     def get_current_yaw(self):
         orientation = self._local_odometry.pose.pose.orientation
@@ -356,8 +437,8 @@ class ModelEvalNode():
 
 if __name__ == "__main__":
     try:
-        print('init model eval node')
-        rospy.init_node('model_eval', anonymous=True)
+        print('start model eval node')
+        rospy.init_node('model_eval', anonymous=True, log_level=rospy.DEBUG)
         node_me = ModelEvalNode()
     except rospy.ROSInterruptException:
         print('ros node model-evaluation terminated...')

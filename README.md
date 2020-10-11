@@ -10,17 +10,32 @@
     catkin init
     ```
 
-- config catkin workspace using python3
+- config catkin workspace using python3 
+  - for jetson nano
     ```
     catkin config --cmake-args -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXECUTABLE=/usr/bin/python3 -DPYTHON_INCLUDE_DIR=/usr/include/python3.6m -DPYTHON_LIBRARY=/usr/lib/aarch64-linux-gnu/libpython3.6m.so
     ```
+  - for other ubuntu machine (they use different path for libpython3.6m.so)
+    ```
+    catkin config --cmake-args -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXECUTABLE=/usr/bin/python3 -DPYTHON_INCLUDE_DIR=/usr/include/python3.6m -DPYTHON_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.6m.so
+    ```
+
+
+
+- install python3-catkin-pkg
+  - `sudo apt-get install python3-catkin-pkg-modules`
   
-- build **geometry2** and **explainable_rl_ros**
+- build **geometry2**, **vision_opencv** and **explainable_rl_ros** with python3
     ```
     cd src
     git clone https://github.com/ros/geometry2
     cd geometry2
     git checkout -b melodic-devel origin/melodic-devel
+    cd ..
+
+    git clone https://github.com/ros-perception/vision_opencv.git
+    cd vision_opencv
+    git checkout -b melodic origin/melodic
     cd ..
     
     git clone https://github.com/heleidsn/explainable_rl_ros.git
@@ -55,6 +70,8 @@
 
 
 ## problems
+
+### for jetson nano
 
 - vision_opencv problem
 
@@ -106,6 +123,14 @@
       find_package(Boost REQUIRED)
       endif()
       ```
+
+### for other ubuntu machine
+
+#### install opencv for python
+- `pip3 install --upgrade pip`
+- `pip3 install rospkg`
+- `pip3 install opencv-python`
+- `pip3 install tensorflow-gpu==1.14.0`
 
 ## sub and pub
 
