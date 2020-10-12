@@ -39,6 +39,17 @@ cd ..
 catkin build cv_bridge
 ```
 
+5. tf
+
+需要在python3环境下对geometry和geometry2两个包进行重新编译
+```
+cd src
+git clone https://github.com/ros/geometry
+git clone https://github.com/ros/geometry2
+cd ..
+catkin build
+```
+
 ## 问题解决
 
 ### 解决编译中出现的Boost问题
