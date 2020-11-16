@@ -1,4 +1,3 @@
 *.pyc
 .vscode/settings.json
 /scripts/models
-/scripts/test
