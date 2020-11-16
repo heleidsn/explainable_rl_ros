@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2020-08-29 14:51:26
-LastEditTime: 2020-11-16 11:17:19
+LastEditTime: 2020-11-16 11:24:08
 LastEditors: Lei He
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -682,8 +682,8 @@ if __name__ == "__main__":
         rospy.init_node('model_eval', anonymous=True, log_level=rospy.DEBUG)
 
         # model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/2020_11_13_08_29_remove_reach_and_crash_reward_-1_1/models/2020_11_13_08_29_remove_reach_and_crash_reward_-1_1_100000.zip'
-        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/2020_11_15_22_42_new_policy_2d/models/2020_11_15_22_42_new_policy_2d_100000.zip'
-        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/configs/config.ini'
+        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models_real/model_1_1115_2d.zip'
+        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/configs/config.ini'
         node_me = ModelEvalNode(model_path, config_path)
         node_me.start_controller()
 
