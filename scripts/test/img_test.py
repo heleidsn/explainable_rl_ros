@@ -5,8 +5,8 @@ LastEditTime: 2020-11-16 20:34:47
 FilePath: /explainable_rl_ros/scripts/test/img_test.py
 '''
 import rospy
-from sensor_msgs.msg import CompressedImage
-from cv_bridge import CvBridge
+from sensor_msgs.msg import CompressedImage, Image
+from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 import os
@@ -21,17 +21,48 @@ class ImageSubTest():
 
         self.bridge = CvBridge()
 
-        depth_image_topic = '/camera/aligned_depth_to_color/image_raw/compressedDepth'
-
-        rospy.Subscriber(depth_image_topic, CompressedImage, callback=self.image_Cb, queue_size=10)
+        # depth_image_topic = '/camera/aligned_depth_to_color/image_raw/compressedDepth'
+        # rospy.Subscriber(depth_image_topic, CompressedImage, callback=self.image_Cb, queue_size=10)
+        depth_image_topic = '/camera/aligned_depth_to_color/image_raw'
+        rospy.Subscriber(depth_image_topic, Image, callback=self.image_depth_Cb, queue_size=10)
 
         self.control_rate = 10
+        self.max_depth_meter_realsense = 10
         
         while not rospy.is_shutdown():
 
             rospy.sleep(1 / self.control_rate)
+
+    def image_depth_Cb(self, msg):
+        depth_image_msg = msg
+        # get depth image in mm
+        try:
+            # tranfer image from ros msg to opencv image encode F32C1
+            cv_image = self.bridge.imgmsg_to_cv2(depth_image_msg, desired_encoding=depth_image_msg.encoding)
+        except CvBridgeError as e:
+            print(e)
+
+        depth_mm = cv_image
+
+        # rescale image to 100 80
+        image = np.array(cv_image, dtype=np.float32)
+        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_AREA)
+
+        # get depth image in meter
+        image_small_meter = image_small / 1000  # transter depth from mm to meter
+        # image_small_meter[image_small_meter == 0] = self.max_depth_meter_realsense
+        # image_small_meter = np.clip(image_small_meter, 0, 10)
+        print("min, max = {}, {}".format(image_small_meter.min(), image_small_meter.max()))
+        
+        # get depth image in gray (0-255)
+        image_gray = image_small_meter / self.max_depth_meter_realsense * 255
+        image_gray_int = image_gray.astype(np.uint8)
+
+        obs = 255 - image_gray_int
+        cv2.imshow('obs', obs)
+        cv2.waitKey(1)
     
-    def image_Cb(self, msg):
+    def image_compressed_Cb(self, msg):
         '''
         ref: https://answers.ros.org/question/249775/display-compresseddepth-image-python-cv2/
         '''

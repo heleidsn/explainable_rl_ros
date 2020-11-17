@@ -18,12 +18,14 @@ import cv2
 import rospy
 import time
 
+print(sys.path)
+
 from mavros_msgs.msg import State, PositionTarget
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from visualization_msgs.msg import Marker
-from explainable_rl_ros.msg import vel_cmd
+# from explainable_rl_ros.msg import vel_cmd
 
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
@@ -102,11 +104,11 @@ class ModelEvalNode():
             # 3. set action
             self.set_action(action_real)
             
-            rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
-            rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
-            rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
+            # rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
+            # rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
+            # rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
             
-            rate.sleep()
+            # rate.sleep()
 
     def set_config(self, cfg):
         # gazebo section
@@ -128,6 +130,7 @@ class ModelEvalNode():
         self.goal_distance = None
         self.max_depth_meter = cfg.getfloat('gazebo', 'max_depth_meter')
         self.max_depth_meter_gazebo = cfg.getfloat('gazebo', 'max_depth_meter_gazebo')
+        self.max_depth_meter_realsense = cfg.getfloat('gazebo', 'max_depth_meter_realsense')
 
         self.image_height = cfg.getint('gazebo', 'image_height')
         self.image_width = cfg.getint('gazebo', 'image_width')
@@ -166,8 +169,8 @@ class ModelEvalNode():
         self._depth_image_gray_input = rospy.Publisher('network/depth_image_input', Image, queue_size=10)
 
         # debug info
-        self._action_msg_pub = rospy.Publisher('/network/debug/action', vel_cmd, queue_size=10)
-        self._state_vel_msg_pub = rospy.Publisher('/network/debug/state', vel_cmd, queue_size=10)
+        # self._action_msg_pub = rospy.Publisher('/network/debug/action', vel_cmd, queue_size=10)
+        # self._state_vel_msg_pub = rospy.Publisher('/network/debug/state', vel_cmd, queue_size=10)
         
         # --------------Subscribers------------------
         # sub topic name
@@ -488,17 +491,17 @@ class ModelEvalNode():
         self.publish_marker_goal_pose(self._goal_pose)
 
         # publish action and state
-        action_msg = vel_cmd()
-        action_msg.vel_xy = control_msg.velocity.x
-        action_msg.vel_z = control_msg.velocity.z
-        action_msg.yaw_rate = control_msg.yaw_rate
-        self._action_msg_pub.publish(action_msg)
+        # action_msg = vel_cmd()
+        # action_msg.vel_xy = control_msg.velocity.x
+        # action_msg.vel_z = control_msg.velocity.z
+        # action_msg.yaw_rate = control_msg.yaw_rate
+        # self._action_msg_pub.publish(action_msg)
 
-        state_vel_msg = vel_cmd()
-        state_vel_msg.vel_xy = self.state_feature_raw[3]
-        state_vel_msg.vel_z = self.state_feature_raw[4]
-        state_vel_msg.yaw_rate = self.state_feature_raw[5]
-        self._state_vel_msg_pub.publish(state_vel_msg)
+        # state_vel_msg = vel_cmd()
+        # state_vel_msg.vel_xy = self.state_feature_raw[3]
+        # state_vel_msg.vel_z = self.state_feature_raw[4]
+        # state_vel_msg.yaw_rate = self.state_feature_raw[5]
+        # self._state_vel_msg_pub.publish(state_vel_msg)
 
     def get_pose_from_velocity(self, action):
         '''
