@@ -34,8 +34,8 @@ import math
 
 from configparser import ConfigParser
 
-from scripts_final.td3 import TD3
-# from stable_baselines import TD3
+# from scripts_final.td3 import TD3
+from stable_baselines import TD3
 
 class ModelEvalNode():
     def __init__(self, model_path, config_path):
@@ -69,7 +69,8 @@ class ModelEvalNode():
         rospy.logdebug('model load success')
 
         # get action num. 2 for 2d, 3 for 3d
-        self.action_num = self.model.action_space.shape[0] 
+        self.action_num = self.model.action_space.shape[0]
+        rospy.loginfo('action num: {}'.format(self.action_num)) 
 
         if self.action_num == 2:
             self.action_last = np.array([0, 0])
@@ -104,11 +105,11 @@ class ModelEvalNode():
             # 3. set action
             self.set_action(action_real)
             
-            # rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
-            # rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
-            # rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
             
-            # rate.sleep()
+            rate.sleep()
 
     def set_config(self, cfg):
         # gazebo section
@@ -116,10 +117,11 @@ class ModelEvalNode():
         self.image_source = cfg.get('gazebo', 'image_source')
         assert self.image_source=='gazebo' or self.image_source == 'realsense', \
             'image_source setting error: should be gazebo or realsense'
-
+        rospy.loginfo('image source: ' + self.image_source)
         self.control_method = cfg.get('gazebo', 'control_method')
         assert self.control_method == 'velocity' or self.control_method == 'position', \
             'control_method setting error: should be velocity or position'
+        rospy.loginfo('control method: ' + self.control_method)
 
         self.model_path = cfg.get('gazebo', 'model_path')
         
@@ -224,7 +226,7 @@ class ModelEvalNode():
 
         # deal with nan
         image[np.isnan(image)] = self.max_depth_meter_gazebo
-        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_AREA)
+        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_NEAREST)
         self._depth_image_meter = np.copy(image_small)
 
         # get image gray (0-255)
@@ -248,11 +250,12 @@ class ModelEvalNode():
         
         # rescale image to 100 80
         image = np.array(cv_image, dtype=np.float32)
-        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_AREA)
+        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_NEAREST)
 
         # get depth image in meter
         image_small_meter = image_small / 1000  # transter depth from mm to meter
         image_small_meter[image_small_meter == 0] = self.max_depth_meter_realsense
+        image_small_meter = np.clip(image_small_meter, 0.2, self.max_depth_meter_realsense)
         self._depth_image_meter = np.copy(image_small_meter)
 
         # get depth image in gray (0-255)
@@ -260,8 +263,10 @@ class ModelEvalNode():
         image_gray_int = image_gray.astype(np.uint8)
         self._depth_image_gray = np.copy(image_gray_int)
 
+        obs = 255 - image_gray_int
+
         # publish image topic
-        image_msg = self.bridge.cv2_to_imgmsg(self._depth_image_gray)
+        image_msg = self.bridge.cv2_to_imgmsg(obs)
         self._depth_image_gray_input.publish(image_msg)
 
     def _click_goalCb(self, msg):
@@ -685,7 +690,8 @@ if __name__ == "__main__":
         rospy.init_node('model_eval', anonymous=True, log_level=rospy.DEBUG)
 
         # model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models/2020_11_13_08_29_remove_reach_and_crash_reward_-1_1/models/2020_11_13_08_29_remove_reach_and_crash_reward_-1_1_100000.zip'
-        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models_real/model_1_1115_2d.zip'
+        # model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models_real/model_1_1115_2d.zip'
+        model_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/models_real/best_model_custom_policy.zip'
         config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/configs/config.ini'
         node_me = ModelEvalNode(model_path, config_path)
         node_me.start_controller()
