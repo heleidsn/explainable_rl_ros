@@ -9,7 +9,7 @@ def modified_cnn(scaled_images, **kwargs):
 
     input_image = scaled_images
 
-    num_direct_features = 3
+    num_direct_features = 2
     other_features = tf.contrib.slim.flatten(scaled_images[..., -1])
     other_features = other_features[:, :num_direct_features]
     scaled_images = scaled_images[..., :-1]
