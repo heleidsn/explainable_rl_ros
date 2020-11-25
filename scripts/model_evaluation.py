@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2020-08-29 14:51:26
-LastEditTime: 2020-11-19 17:13:52
+LastEditTime: 2020-11-25 14:32:29
 LastEditors: Lei He
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -23,7 +23,7 @@ from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from visualization_msgs.msg import Marker
-from explainable_rl_ros.msg import vel_cmd
+# from explainable_rl_ros.msg import vel_cmd
 
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image, CompressedImage
@@ -98,9 +98,11 @@ class ModelEvalNode():
             # 3. set action
             self.set_action(action_real)
             
+            # 4. log some data
             rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
             rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
             rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('obs min: {:.2f} max: {:.2f}'.format(self._depth_image_meter.min(), self._depth_image_meter.max()))
             
             rate.sleep()
 
@@ -161,9 +163,9 @@ class ModelEvalNode():
         # image
         self._depth_image_gray_input = rospy.Publisher('network/depth_image_input', Image, queue_size=10)
 
-        # debug info
-        self._action_msg_pub = rospy.Publisher('/network/debug/action', vel_cmd, queue_size=10)
-        self._state_vel_msg_pub = rospy.Publisher('/network/debug/state', vel_cmd, queue_size=10)
+        # # debug info
+        # self._action_msg_pub = rospy.Publisher('/network/debug/action', vel_cmd, queue_size=10)
+        # self._state_vel_msg_pub = rospy.Publisher('/network/debug/state', vel_cmd, queue_size=10)
         
         # --------------Subscribers------------------
         # sub topic name
@@ -335,7 +337,6 @@ class ModelEvalNode():
         '''
         1. get depth image obs from gazebo msg
         '''
-        print('obs min: {:.2f} max: {:.2f}'.format(self._depth_image_meter.min(), self._depth_image_meter.max()))
         # get depth image from current topic
         image = self._depth_image_gray.copy() # Note: check image format. Now is 0-black near 255-wight far
 
@@ -351,7 +352,7 @@ class ModelEvalNode():
         '''
         state_feature_array = np.zeros((self.image_height, self.image_width))
 
-        state_feature = self._get_state_feature_2()
+        state_feature = self._get_state_feature()
         state_feature_array[0, 0:self.state_feature_length] = state_feature
 
         image_with_state = np.array([image_obs, state_feature_array])
@@ -362,6 +363,7 @@ class ModelEvalNode():
 
     def _get_state_feature(self):
         '''
+        get state feature with velocity!
         Airsim pose use NED SYSTEM
         Gazebo pose z-axis up is positive different from NED
         Gazebo twist using body frame
@@ -391,39 +393,27 @@ class ModelEvalNode():
         linear_velocity_z_norm = (linear_velocity_z / self.max_vel_z / 2 + 0.5) * 255
         angular_velocity_norm = (-current_vel_local.angular.z / self.max_vel_yaw_rad / 2 + 0.5) * 255  # TODO: check the sign of the 
 
-        self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
-        state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm, linear_velocity_norm, linear_velocity_z_norm, angular_velocity_norm])
+        if self.state_feature_length == 2:
+            # 2d velocity control
+            self.state_feature_raw = np.array([distance, relative_yaw])
+            state_norm = np.array([distance_norm, relative_yaw_norm])
+        elif self.state_feature_length == 3:
+            # 3d velocity control
+            self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw])
+            state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm])
+        elif self.state_feature_length == 4:
+            # 2d acc control
+            self.state_feature_raw = np.array([distance, relative_yaw, linear_velocity_xy, current_vel_local.angular.z])
+            state_norm = np.array([distance_norm, relative_yaw_norm, linear_velocity_norm, angular_velocity_norm])
+        else:
+            # 3d acc control
+            self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
+            state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm, linear_velocity_norm, linear_velocity_z_norm, angular_velocity_norm])
+
         state_norm = np.clip(state_norm, 0, 255)
         self.state_feature_norm = state_norm / 255
 
-        return state_norm
-
-    def _get_state_feature_2(self):
-        '''
-        get state feature with only distance and relative angle (2 state)
-        Airsim pose use NED SYSTEM
-        Gazebo pose z-axis up is positive different from NED
-        Gazebo twist using body frame
-        '''
-        goal_pose = self._goal_pose
-        current_pose = self.pose_local
-        current_vel = self.vel_local
-        # get distance and angle in polar coordinate
-        # transfer to 0~255 image formate for cnn
-        relative_pose_x = goal_pose.pose.position.x - current_pose.pose.position.x
-        relative_pose_y = goal_pose.pose.position.y - current_pose.pose.position.y
-        relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
-        distance = math.sqrt(pow(relative_pose_x, 2) + pow(relative_pose_y, 2))
-        relative_yaw = self._get_relative_yaw(current_pose, goal_pose)
-
-        distance_norm = distance / self.goal_distance * 255
-        
-        relative_yaw_norm = (relative_yaw / math.pi / 2 + 0.5 ) * 255
-
-        self.state_feature_raw = np.array([distance, relative_yaw])
-        state_norm = np.array([distance_norm, relative_yaw_norm])
-        state_norm = np.clip(state_norm, 0, 255)
-        self.state_feature_norm = state_norm / 255
+        self.all_state_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
 
         return state_norm
 
@@ -465,6 +455,9 @@ class ModelEvalNode():
             pose_setpoint.pose.orientation.y = orientation_setpoint[1]
             pose_setpoint.pose.orientation.z = orientation_setpoint[2]
             pose_setpoint.pose.orientation.w = orientation_setpoint[3]
+        elif self._depth_image_meter.min() < 2:
+            pose_setpoint = current_pose
+            rospy.logerr("too close to the obs, < 2m!!!")
         else:
             # use first order low pass filter to actions
             action_smooth = self.filter_alpha * action + (1 - self.filter_alpha) * self.action_last
@@ -566,18 +559,18 @@ class ModelEvalNode():
 
         self.publish_marker_goal_pose(self._goal_pose)
 
-        # publish action and state
-        action_msg = vel_cmd()
-        action_msg.vel_xy = control_msg.velocity.x
-        action_msg.vel_z = control_msg.velocity.z
-        action_msg.yaw_rate = control_msg.yaw_rate
-        self._action_msg_pub.publish(action_msg)
+        # # publish action and state
+        # action_msg = vel_cmd()
+        # action_msg.vel_xy = control_msg.velocity.x
+        # action_msg.vel_z = control_msg.velocity.z
+        # action_msg.yaw_rate = control_msg.yaw_rate
+        # self._action_msg_pub.publish(action_msg)
 
-        state_vel_msg = vel_cmd()
-        state_vel_msg.vel_xy = self.state_feature_raw[3]
-        state_vel_msg.vel_z = self.state_feature_raw[4]
-        state_vel_msg.yaw_rate = self.state_feature_raw[5]
-        self._state_vel_msg_pub.publish(state_vel_msg)
+        # state_vel_msg = vel_cmd()
+        # state_vel_msg.vel_xy = self.state_feature_raw[3]
+        # state_vel_msg.vel_z = self.state_feature_raw[4]
+        # state_vel_msg.yaw_rate = self.state_feature_raw[5]
+        # self._state_vel_msg_pub.publish(state_vel_msg)
 
     def get_pose_from_velocity(self, action):
         '''
