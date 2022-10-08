@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2020-08-29 14:51:26
-LastEditTime: 2022-10-08 09:14:21
+LastEditTime: 2022-10-08 09:24:30
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -58,7 +58,7 @@ class ModelEvalNode():
         rospy.logdebug('model load success')
 
         # get action num. 2 for 2d, 3 for 3d
-        self.action_num = self.model.action_space.shape[0] 
+        self.action_num = self.model.action_space.shape[0]
 
         if self.action_num == 2:
             self.action_last = np.array([0, 0])
@@ -74,7 +74,7 @@ class ModelEvalNode():
     def start_controller(self):
         rospy.logdebug('neural network controller start...')
 
-        rate = rospy.Rate(self.control_rate) # 10Hz
+        rate = rospy.Rate(self.control_rate)  # 10Hz
         rospy.loginfo('control rate: {}'.format(self.control_rate))
 
         self.check_topics_ready()
@@ -90,9 +90,9 @@ class ModelEvalNode():
             self.set_action(action_real)
 
             # 4. log some data
-            rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind':lambda x: "%.2f" % x}))
-            rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind':lambda x: "%.2f" % x}))
-            rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind': lambda x: "%.2f" % x}))
+            rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind': lambda x: "%.2f" % x}))
+            rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind': lambda x: "%.2f" % x}))
             rospy.logdebug('obs min: {:.2f} max: {:.2f}'.format(self._depth_image_meter.min(), self._depth_image_meter.max()))
 
             rate.sleep()
@@ -147,7 +147,7 @@ class ModelEvalNode():
         self._goal_pose_marker_pub = rospy.Publisher('network/marker_goal', Marker, queue_size=10)
 
         # control command
-        self._local_pose_setpoint_pub = rospy.Publisher('/mavros/setpoint_position/local',PoseStamped, queue_size=10)
+        self._local_pose_setpoint_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=10)
         self._setpoint_marker_pub = rospy.Publisher('network/marker_pose_setpoint', Marker, queue_size=10)
         self._setpoint_raw_pub = rospy.Publisher('mavros/setpoint_raw/local', PositionTarget, queue_size=10)
 
@@ -221,7 +221,7 @@ class ModelEvalNode():
 
         # rescale image to 100 80
         image = np.array(cv_image, dtype=np.float32)
-        image_small = cv2.resize(image, (100, 80), interpolation = cv2.INTER_NEAREST)
+        image_small = cv2.resize(image, (100, 80), interpolation=cv2.INTER_NEAREST)
 
         # get depth image in meter
         image_small_meter = image_small / 1000  # transter depth from mm to meter
@@ -301,10 +301,10 @@ class ModelEvalNode():
         goal_x = clicked_goal_pose.pose.position.x
         goal_y = clicked_goal_pose.pose.position.y
         goal_z = self.goal_init_z
-        rospy.logdebug('recieved clicked goal pose: {:.2f} {:.2f} {:.2f}'.format(goal_x, goal_y, goal_z))
+        rospy.logdebug('received clicked goal pose: {:.2f} {:.2f} {:.2f}'.format(goal_x, goal_y, goal_z))
         self.set_goal_pose(goal_x, goal_y, goal_z)
 
-# check system 
+# check system
     def check_topics_ready(self):
         rospy.logdebug('waiting for msgs')
         # wait for latest msgs
@@ -331,7 +331,7 @@ class ModelEvalNode():
         1. get depth image obs from gazebo msg
         '''
         # get depth image from current topic
-        image = self._depth_image_gray.copy() # Note: check image format. Now is 0-black near 255-wight far
+        image = self._depth_image_gray.copy()  # Note: check image format. Now is 0-black near 255-wight far
 
         # transfer image to image obs according to 0-far  255-nears
         image_obs = 255 - image
@@ -375,16 +375,16 @@ class ModelEvalNode():
         distance_norm = distance / self.goal_distance * 255
         vertical_distance_norm = (-relative_pose_z / self.max_vertical_difference / 2 + 0.5) * 255
 
-        relative_yaw_norm = (relative_yaw / math.pi / 2 + 0.5 ) * 255
+        relative_yaw_norm = (relative_yaw / math.pi / 2 + 0.5) * 255
 
         # current speed and angular speed
         current_vel_local = current_vel.twist
         linear_velocity_xy = current_vel_local.linear.x  # forward velocity
         linear_velocity_xy = math.sqrt(pow(current_vel_local.linear.x, 2) + pow(current_vel_local.linear.y, 2))
         linear_velocity_norm = linear_velocity_xy / self.max_vel_x * 255
-        linear_velocity_z = current_vel_local.linear.z  #  vertical velocity
+        linear_velocity_z = current_vel_local.linear.z  # vertical velocity
         linear_velocity_z_norm = (linear_velocity_z / self.max_vel_z / 2 + 0.5) * 255
-        angular_velocity_norm = (-current_vel_local.angular.z / self.max_vel_yaw_rad / 2 + 0.5) * 255  # TODO: check the sign of the 
+        angular_velocity_norm = (-current_vel_local.angular.z / self.max_vel_yaw_rad / 2 + 0.5) * 255  # TODO: check the sign of the
 
         if self.state_feature_length == 2:
             # 2d velocity control
@@ -431,12 +431,12 @@ class ModelEvalNode():
         # get distance to goal
         goal_pose = self._goal_pose
         current_pose = self.pose_local
-        current_vel = self.vel_local
+        # current_vel = self.vel_local
         # get distance and angle in polar coordinate
         # transfer to 0~255 image formate for cnn
         relative_pose_x = goal_pose.pose.position.x - current_pose.pose.position.x
         relative_pose_y = goal_pose.pose.position.y - current_pose.pose.position.y
-        relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
+        # relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
         distance = math.sqrt(pow(relative_pose_x, 2) + pow(relative_pose_y, 2))
 
         if distance < 3:
@@ -454,7 +454,7 @@ class ModelEvalNode():
         else:
             # use first order low pass filter to actions
             action_smooth = self.filter_alpha * action + (1 - self.filter_alpha) * self.action_last
-            rospy.logdebug('action smooth: ' + np.array2string(action_smooth, formatter={'float_kind':lambda x: "%.2f" % x}))
+            rospy.logdebug('action smooth: ' + np.array2string(action_smooth, formatter={'float_kind': lambda x: "%.2f" % x}))
             self.action_last = action_smooth
 
             # get yaw and yaw setpoint
@@ -487,7 +487,7 @@ class ModelEvalNode():
         self.publish_marker_goal_pose(self._goal_pose)
 
     def set_action_vel(self, action):
-        
+
         control_msg = PositionTarget()
         control_msg.header.stamp = rospy.Time.now()
         control_msg.header.frame_id = 'local_origin'
@@ -523,7 +523,7 @@ class ModelEvalNode():
         # control_msg.velocity.x = cmd_vel_x_final
         # control_msg.velocity.y = 0
         # control_msg.velocity.z = cmd_vel_z_final
-        
+
         # control_msg.yaw_rate = cmd_yaw_rate_final
 
         # direct control
@@ -536,8 +536,7 @@ class ModelEvalNode():
             control_msg.velocity.z = action[1]
         else:
             rospy.logerr("action num error: action num should be 2 or 3, now is {}".format(self.action_num))
-        
-        
+
         control_msg.yaw_rate = action[-1]
 
         # control_msg.yaw_rate = 1
@@ -578,7 +577,7 @@ class ModelEvalNode():
         current_yaw = self.get_current_yaw()
         yaw_speed = action[-1]
         yaw_setpoint = current_yaw + yaw_speed
-        
+
         dx_local, dy_local = self.point_transfer(dx_body, dy_body, -yaw_setpoint)
 
         # publish setpoint
@@ -619,11 +618,11 @@ class ModelEvalNode():
         control_msg.velocity.x = vel_cmd_enu[0]
         control_msg.velocity.y = 0
         control_msg.velocity.z = vel_cmd_enu[1]
-        
+
         control_msg.yaw_rate = vel_cmd_enu[2]
 
         self._setpoint_raw_pub.publish(control_msg)
-        
+
     def publish_marker_goal_pose(self, goal_pose):
         # publish goal pose marker
         marker = Marker()
@@ -647,7 +646,7 @@ class ModelEvalNode():
         self._goal_pose_marker_pub.publish(marker)
 
     def publish_marker_setpoint_pose(self, pose_setpoint):
-        
+
         marker = Marker()
         marker.header.stamp = rospy.Time.now()
         marker.header.frame_id = 'local_origin'
@@ -675,9 +674,9 @@ class ModelEvalNode():
         angle = math.atan2(relative_pose_y, relative_pose_x)
 
         # get current yaw
-        explicit_quat = [current_pose.pose.orientation.x, current_pose.pose.orientation.y, \
-                                current_pose.pose.orientation.z, current_pose.pose.orientation.w]
-        
+        explicit_quat = [current_pose.pose.orientation.x, current_pose.pose.orientation.y,
+                         current_pose.pose.orientation.z, current_pose.pose.orientation.w]
+
         yaw_current = euler_from_quaternion(explicit_quat)[2]
 
         # get yaw error
@@ -717,10 +716,9 @@ class ModelEvalNode():
     def get_current_yaw(self):
         orientation = self.pose_local.pose.orientation
 
-        current_orientation = [orientation.x, orientation.y, \
-                                orientation.z, orientation.w]
-            
-        current_attitude = euler_from_quaternion(current_orientation)
+        current_orientation = [orientation.x, orientation.y, orientation.z, orientation.w]
+
+        # current_attitude = euler_from_quaternion(current_orientation)
         current_yaw = euler_from_quaternion(current_orientation)[2]
 
         return current_yaw
