@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 '''
 Author: Lei He
-Date: 2020-08-29 14:51:26
-LastEditTime: 2022-10-08 09:24:30
+Date: 2022-10-08 09:36:02
+LastEditTime: 2022-10-08 12:07:16
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
 '''
 
-import sys
-import cv2
-import rospy
+import math
+from configparser import ConfigParser
 
-from mavros_msgs.msg import State, PositionTarget
-from geometry_msgs.msg import TwistStamped, PoseStamped
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge, CvBridgeError
+from geometry_msgs.msg import PoseStamped, TwistStamped
+from mavros_msgs.msg import PositionTarget, State
+from sensor_msgs.msg import CompressedImage, Image
+from stable_baselines3 import SAC
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from visualization_msgs.msg import Marker
-
-from cv_bridge import CvBridge, CvBridgeError
-from sensor_msgs.msg import Image, CompressedImage
-import numpy as np
-import math
-
-from configparser import ConfigParser
-from stable_baselines3 import TD3
 
 
 class ModelEvalNode():
@@ -54,7 +51,7 @@ class ModelEvalNode():
         self._depth_image_gray = None
 
         # load model
-        self.model = TD3.load(self.model_path)
+        self.model = SAC.load(self.model_path)
         rospy.logdebug('model load success')
 
         # get action num. 2 for 2d, 3 for 3d
@@ -84,7 +81,7 @@ class ModelEvalNode():
             obs = self.get_obs()
 
             # 2. get action
-            action_real, _ = self.model.predict(obs)
+            action_real, _ = self.model.predict(obs, deterministic=True)
 
             # 3. set action
             self.set_action(action_real)
@@ -98,34 +95,33 @@ class ModelEvalNode():
             rate.sleep()
 
     def set_config(self, cfg):
-        # gazebo section
-        self.control_rate = cfg.getint('gazebo', 'control_rate')
-        self.image_source = cfg.get('gazebo', 'image_source')
+        # sim_setting section
+        self.control_rate = cfg.getint('sim_setting', 'control_rate')
+        self.image_source = cfg.get('sim_setting', 'image_source')
         assert self.image_source == 'gazebo' or self.image_source == 'realsense' or \
-            self.image_source == 'rosbag', \
-            'image_source setting error: should be gazebo or realsense'
+            self.image_source == 'rosbag' or self.image_source == 'airsim', 'image_source setting error: should be gazebo or realsense'
 
-        self.control_method = cfg.get('gazebo', 'control_method')
+        self.control_method = cfg.get('sim_setting', 'control_method')
         assert self.control_method == 'velocity' or self.control_method == 'position', \
             'control_method setting error: should be velocity or position'
 
-        self.model_path = cfg.get('gazebo', 'model_path')
+        self.model_path = cfg.get('sim_setting', 'model_path')
 
         # filter alpha for action low pass filter
-        self.filter_alpha = self.cfg.getfloat('gazebo', 'filter_alpha')
+        self.filter_alpha = self.cfg.getfloat('sim_setting', 'filter_alpha')
 
-        self.goal_init_x = cfg.getfloat('gazebo', 'goal_x')
-        self.goal_init_y = cfg.getfloat('gazebo', 'goal_y')
-        self.goal_init_z = cfg.getfloat('gazebo', 'goal_z')
+        self.goal_init_x = cfg.getfloat('sim_setting', 'goal_x')
+        self.goal_init_y = cfg.getfloat('sim_setting', 'goal_y')
+        self.goal_init_z = cfg.getfloat('sim_setting', 'goal_z')
 
         self.goal_distance = None
-        self.max_depth_meter = cfg.getfloat('gazebo', 'max_depth_meter')
-        self.min_depth_meter = cfg.getfloat('gazebo', 'min_depth_meter')
+        self.max_depth_meter = cfg.getfloat('sim_setting', 'max_depth_meter')
+        self.min_depth_meter = cfg.getfloat('sim_setting', 'min_depth_meter')
 
-        self.image_height = cfg.getint('gazebo', 'image_height')
-        self.image_width = cfg.getint('gazebo', 'image_width')
+        self.image_height = cfg.getint('sim_setting', 'image_height')
+        self.image_width = cfg.getint('sim_setting', 'image_width')
 
-        self.state_feature_length = cfg.getint('gazebo', 'state_feature_length')
+        self.state_feature_length = cfg.getint('sim_setting', 'state_feature_length')
 
         # uav_model section
         self.acc_lim_x = cfg.getfloat('uav_model', 'acc_lim_x')
@@ -183,6 +179,9 @@ class ModelEvalNode():
         elif self.image_source == 'rosbag':
             self.sub_topic_depth_image = '/camera/aligned_depth_to_color/image_raw/compressedDepth'
             rospy.Subscriber(self.sub_topic_depth_image, CompressedImage, callback=self._image_rosbag_Cb, queue_size=10)
+        elif self.image_source == 'airsim':
+            self.sub_topic_depth_image = '/airsim_node/drone_1/camera_1/DepthPlanar'
+            rospy.Subscriber(self.sub_topic_depth_image, Image, callback=self._image_airsim_Cb, queue_size=10)
         else:
             rospy.logerr("image_source error")
 
@@ -198,11 +197,11 @@ class ModelEvalNode():
 
     def _image_rosbag_Cb(self, msg):
         # 'msg' as type CompressedImage
-        depth_fmt, compr_type = msg.format.split(';')
+        depth_fmt, compress_type = msg.format.split(';')
         # remove white space
         depth_fmt = depth_fmt.strip()
-        compr_type = compr_type.strip()
-        if compr_type != "compressedDepth":
+        compress_type = compress_type.strip()
+        if compress_type != "compressedDepth":
             raise Exception("Compression type is not 'compressedDepth'."
                             "You probably subscribed to the wrong topic.")
 
@@ -224,7 +223,7 @@ class ModelEvalNode():
         image_small = cv2.resize(image, (100, 80), interpolation=cv2.INTER_NEAREST)
 
         # get depth image in meter
-        image_small_meter = image_small / 1000  # transter depth from mm to meter
+        image_small_meter = image_small / 1000  # transfer depth from mm to meter
 
         # deal with zero values
         image_small_meter[image_small_meter == 0] = self.max_depth_meter
@@ -255,7 +254,7 @@ class ModelEvalNode():
         image = np.array(cv_image, dtype=np.float32)
 
         # rescale
-        image_small = cv2.resize(image, (100, 80), interpolation=cv2.INTER_NEAREST)
+        image_small = cv2.resize(image, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST)
 
         # deal with nan
         image_small[np.isnan(image_small)] = self.max_depth_meter
@@ -272,7 +271,7 @@ class ModelEvalNode():
 
         # get depth image in mm
         try:
-            # tranfer image from ros msg to opencv image encode F32C1
+            # transfer image from ros msg to opencv image encode F32C1
             cv_image = self.bridge.imgmsg_to_cv2(depth_image_msg,
                                                  desired_encoding=depth_image_msg.encoding)
         except CvBridgeError as e:
@@ -280,10 +279,10 @@ class ModelEvalNode():
 
         # rescale image to 100 80
         image = np.array(cv_image, dtype=np.float32)
-        image_small = cv2.resize(image, (100, 80), interpolation=cv2.INTER_NEAREST)
+        image_small = cv2.resize(image, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST)
 
         # get depth image in meter
-        image_small_meter = image_small / 1000  # transter depth from mm to meter
+        image_small_meter = image_small / 1000  # transfer depth from mm to meter
 
         # deal with zero values
         image_small_meter[image_small_meter == 0] = self.max_depth_meter
@@ -295,6 +294,22 @@ class ModelEvalNode():
         image_gray = self._depth_image_meter / self.max_depth_meter * 255
         image_gray_int = image_gray.astype(np.uint8)
         self._depth_image_gray = image_gray_int
+
+    def _image_airsim_Cb(self, msg):
+        data = msg
+
+        # depth input is 0-20 meter
+        depth_input = self.bridge.imgmsg_to_cv2(data, desired_encoding=data.encoding)
+
+        image_small = cv2.resize(depth_input, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST)
+
+        depth_input = np.clip(image_small, 0, self.max_depth_meter)
+
+        self._depth_image_meter = np.copy(depth_input)
+
+        depth_input = depth_input / self.max_depth_meter * 255
+        image_gray_int = depth_input.astype(np.uint8)
+        self._depth_image_gray = np.copy(image_gray_int)
 
     def _click_goalCb(self, msg):
         clicked_goal_pose = msg
@@ -312,14 +327,17 @@ class ModelEvalNode():
         local_pose_msg = rospy.wait_for_message(self.sub_topic_local_pose, PoseStamped, timeout=1.0)
         local_vel_msg = rospy.wait_for_message(self.sub_topic_local_vel, TwistStamped, timeout=1.0)
 
-        # update state variables
+        rospy.logdebug('update state variables')
         if self.image_source == 'gazebo':
             self._image_gazebo_Cb(image_msg)
         elif self.image_source == 'realsense':
             self._image_realsense_Cb(image_msg)
+        elif self.image_source == 'airsim':
+            self._image_airsim_Cb(image_msg)
         else:
             print('image_source error')
-
+        
+        rospy.logdebug('update')
         self._local_pose_Cb(local_pose_msg)
         self._local_vel_Cb(local_vel_msg)
 
@@ -381,30 +399,13 @@ class ModelEvalNode():
         current_vel_local = current_vel.twist
         linear_velocity_xy = current_vel_local.linear.x  # forward velocity
         linear_velocity_xy = math.sqrt(pow(current_vel_local.linear.x, 2) + pow(current_vel_local.linear.y, 2))
-        linear_velocity_norm = linear_velocity_xy / self.max_vel_x * 255
-        linear_velocity_z = current_vel_local.linear.z  # vertical velocity
-        linear_velocity_z_norm = (linear_velocity_z / self.max_vel_z / 2 + 0.5) * 255
-        angular_velocity_norm = (-current_vel_local.angular.z / self.max_vel_yaw_rad / 2 + 0.5) * 255  # TODO: check the sign of the
 
-        if self.state_feature_length == 2:
-            # 2d velocity control
-            self.state_feature_raw = np.array([distance, relative_yaw])
-            state_norm = np.array([distance_norm, relative_yaw_norm])
-        elif self.state_feature_length == 3:
-            # 3d velocity control
-            self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw])
-            state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm])
-        elif self.state_feature_length == 4:
-            # 2d acc control
-            self.state_feature_raw = np.array([distance, relative_yaw, linear_velocity_xy, current_vel_local.angular.z])
-            state_norm = np.array([distance_norm, relative_yaw_norm, linear_velocity_norm, angular_velocity_norm])
-        else:
-            # 3d acc control
-            self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
-            state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm, linear_velocity_norm, linear_velocity_z_norm, angular_velocity_norm])
+        linear_velocity_z = current_vel_local.linear.z  # vertical velocity
+
+        state_norm = np.array([distance_norm, vertical_distance_norm, relative_yaw_norm])
 
         state_norm = np.clip(state_norm, 0, 255)
-        self.state_feature_norm = state_norm / 255
+        # self.state_feature_norm = state_norm / 255
 
         self.all_state_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
 
@@ -439,7 +440,7 @@ class ModelEvalNode():
         # relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
         distance = math.sqrt(pow(relative_pose_x, 2) + pow(relative_pose_y, 2))
 
-        if distance < 3:
+        if distance < 2:
             # near the goal, set pose cmd to goal pose and current yaw
             pose_setpoint.pose.position = self._goal_pose.pose.position
             current_yaw = self.get_current_yaw()
@@ -463,7 +464,7 @@ class ModelEvalNode():
             yaw_setpoint = current_yaw + yaw_speed
 
             # transfer dx dy from body frame to local frame
-            dx_body = action_smooth[0]
+            dx_body = action_smooth[0] * 0.2
             dy_body = 0
             dx_local, dy_local = self.point_transfer(dx_body, dy_body, -yaw_setpoint)
 
@@ -741,10 +742,10 @@ if __name__ == "__main__":
     try:
         print('start model eval node')
 
-        print(sys.path)
+        # print(sys.path)
         rospy.init_node('model_eval', anonymous=True, log_level=rospy.DEBUG)
 
-        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/configs/config.ini'
+        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/real_test_sb3/config/config_airsim.ini'
         node_me = ModelEvalNode(config_path)
         node_me.start_controller()
 
