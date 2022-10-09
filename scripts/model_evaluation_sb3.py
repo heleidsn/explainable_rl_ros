@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2022-10-08 09:36:02
-LastEditTime: 2022-10-08 12:07:16
+LastEditTime: 2022-10-09 23:24:46
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -75,21 +75,53 @@ class ModelEvalNode():
         rospy.loginfo('control rate: {}'.format(self.control_rate))
 
         self.check_topics_ready()
+        
+        record_data = False
+        step = 0
+        action_list = []
+        state_raw_list = []
+        obs_list = []
 
         while not rospy.is_shutdown():
             # 1. get obs
+            step = step + 1
+            # print(step)
             obs = self.get_obs()
 
             # 2. get action
             action_real, _ = self.model.predict(obs, deterministic=True)
+            # norm action
+            # action_real[0] = action_real[0] / 5
+            # action_real[1] = action_real[1] / 2
+            # action_real[2] = action_real[2] / math.degrees(50)
 
+            # action_real = np.array([3, 0, 0])
             # 3. set action
             self.set_action(action_real)
+            
+            # record data for 200 steps
+            
+            if step < 400 and record_data:
+                obs_list.append(obs)
+                # traj_list.append(pose)
+                action_list.append(action_real)
+                state_raw_list.append(self.state_feature_raw)
+            elif step == 400 and record_data:
+                np.save('action_eval_ros', action_list)
+                np.save('state_eval_ros', state_raw_list)
+                np.save('obs_eval_ros', obs_list)
+            else:
+                action_list = []
+                state_raw_list = []
+                obs_list = []
 
             # 4. log some data
             rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw, formatter={'float_kind': lambda x: "%.2f" % x}))
             rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm, formatter={'float_kind': lambda x: "%.2f" % x}))
             rospy.logdebug('action real: ' + np.array2string(action_real, formatter={'float_kind': lambda x: "%.2f" % x}))
+            # rospy.logdebug('state_raw: ' + np.array2string(self.state_feature_raw))
+            # rospy.logdebug('state_norm: ' + np.array2string(self.state_feature_norm))
+            # rospy.logdebug('action real: ' + np.array2string(action_real))
             rospy.logdebug('obs min: {:.2f} max: {:.2f}'.format(self._depth_image_meter.min(), self._depth_image_meter.max()))
 
             rate.sleep()
@@ -180,7 +212,7 @@ class ModelEvalNode():
             self.sub_topic_depth_image = '/camera/aligned_depth_to_color/image_raw/compressedDepth'
             rospy.Subscriber(self.sub_topic_depth_image, CompressedImage, callback=self._image_rosbag_Cb, queue_size=10)
         elif self.image_source == 'airsim':
-            self.sub_topic_depth_image = '/airsim_node/drone_1/camera_1/DepthPlanar'
+            self.sub_topic_depth_image = '/airsim_node/drone_1/camera_1/DepthVis'
             rospy.Subscriber(self.sub_topic_depth_image, Image, callback=self._image_airsim_Cb, queue_size=10)
         else:
             rospy.logerr("image_source error")
@@ -300,8 +332,10 @@ class ModelEvalNode():
 
         # depth input is 0-20 meter
         depth_input = self.bridge.imgmsg_to_cv2(data, desired_encoding=data.encoding)
+        # cv2.imshow('test', depth_input)
+        # cv2.waitKey(1)
 
-        image_small = cv2.resize(depth_input, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST)
+        image_small = cv2.resize(depth_input, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST) * 100
 
         depth_input = np.clip(image_small, 0, self.max_depth_meter)
 
@@ -336,7 +370,7 @@ class ModelEvalNode():
             self._image_airsim_Cb(image_msg)
         else:
             print('image_source error')
-        
+
         rospy.logdebug('update')
         self._local_pose_Cb(local_pose_msg)
         self._local_vel_Cb(local_vel_msg)
@@ -370,7 +404,7 @@ class ModelEvalNode():
         image_with_state = image_with_state.swapaxes(0, 2)
         image_with_state = image_with_state.swapaxes(0, 1)
 
-        return image_with_state
+        return image_with_state.astype(np.uint8)
 
     def _get_state_feature(self):
         '''
@@ -407,7 +441,8 @@ class ModelEvalNode():
         state_norm = np.clip(state_norm, 0, 255)
         # self.state_feature_norm = state_norm / 255
 
-        self.all_state_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
+        self.state_feature_norm = state_norm
+        self.state_feature_raw = np.array([distance, relative_pose_z, relative_yaw, linear_velocity_xy, linear_velocity_z, current_vel_local.angular.z])
 
         return state_norm
 
@@ -440,18 +475,18 @@ class ModelEvalNode():
         # relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
         distance = math.sqrt(pow(relative_pose_x, 2) + pow(relative_pose_y, 2))
 
-        if distance < 2:
+        if distance < 3:
             # near the goal, set pose cmd to goal pose and current yaw
-            pose_setpoint.pose.position = self._goal_pose.pose.position
+            pose_setpoint.pose.position = self._goal_pose.  pose.position
             current_yaw = self.get_current_yaw()
             orientation_setpoint = quaternion_from_euler(0, 0, current_yaw)
             pose_setpoint.pose.orientation.x = orientation_setpoint[0]
             pose_setpoint.pose.orientation.y = orientation_setpoint[1]
             pose_setpoint.pose.orientation.z = orientation_setpoint[2]
             pose_setpoint.pose.orientation.w = orientation_setpoint[3]
-        elif self._depth_image_meter.min() < 2:
+        elif self._depth_image_meter.min() < 0.5:
             pose_setpoint = current_pose
-            rospy.logerr("too close to the obs, < 2m!!!")
+            rospy.logerr("too close to the obs, < 1m!!!")
         else:
             # use first order low pass filter to actions
             action_smooth = self.filter_alpha * action + (1 - self.filter_alpha) * self.action_last
@@ -460,11 +495,11 @@ class ModelEvalNode():
 
             # get yaw and yaw setpoint
             current_yaw = self.get_current_yaw()
-            yaw_speed = action_smooth[-1]
+            yaw_speed = action_smooth[-1] * 0.2
             yaw_setpoint = current_yaw + yaw_speed
 
             # transfer dx dy from body frame to local frame
-            dx_body = action_smooth[0] * 0.2
+            dx_body = action_smooth[0] * 0.5
             dy_body = 0
             dx_local, dy_local = self.point_transfer(dx_body, dy_body, -yaw_setpoint)
 
@@ -527,25 +562,28 @@ class ModelEvalNode():
 
         # control_msg.yaw_rate = cmd_yaw_rate_final
 
+        action_smooth = self.filter_alpha * action + (1 - self.filter_alpha) * self.action_last
+        self.action_last = action_smooth
+
         # direct control
-        control_msg.velocity.x = action[0]
+        control_msg.velocity.x = action_smooth[0]
         control_msg.velocity.y = 0
 
         if self.action_num == 2:
             control_msg.velocity.z = np.clip(self.state_feature_raw[1], -1, 1)
         elif self.action_num == 3:
-            control_msg.velocity.z = action[1]
+            control_msg.velocity.z = action_smooth[1]
         else:
             rospy.logerr("action num error: action num should be 2 or 3, now is {}".format(self.action_num))
 
-        control_msg.yaw_rate = action[-1]
+        control_msg.yaw_rate = action_smooth[-1] * 0.6
 
         # control_msg.yaw_rate = 1
 
-        rospy.logdebug('action_final: {:.2f} {:.2f} {:.2f}'.format(control_msg.velocity.x, control_msg.velocity.z, control_msg.yaw_rate))
+        rospy.logdebug('action_final: {:.2f} {:.2f} {:.2f}'.format(control_msg.velocity.x, control_msg.velocity.z, math.degrees(control_msg.yaw_rate)))
 
         # publish setpoint marker
-        setpoint_pose = self.get_pose_from_velocity(action)
+        setpoint_pose = self.get_pose_from_velocity(action_smooth)
         self.publish_marker_setpoint_pose(setpoint_pose)
 
         self._setpoint_raw_pub.publish(control_msg)
