@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2022-10-08 09:36:02
-LastEditTime: 2022-10-13 17:10:32
+LastEditTime: 2022-10-13 20:56:52
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -75,7 +75,7 @@ class ModelEvalNode():
         rospy.loginfo('control rate: {}'.format(self.control_rate))
 
         self.check_topics_ready()
-        
+
         record_data = False
         step = 0
         action_list = []
@@ -98,9 +98,9 @@ class ModelEvalNode():
             # action_real = np.array([3, 0, 0])
             # 3. set action
             self.set_action(action_real)
-            
+
             # record data for 200 steps
-            
+
             if step < 600 and record_data:
                 obs_list.append(obs)
                 # traj_list.append(pose)
@@ -131,7 +131,8 @@ class ModelEvalNode():
         self.control_rate = cfg.getint('sim_setting', 'control_rate')
         self.image_source = cfg.get('sim_setting', 'image_source')
         assert self.image_source == 'gazebo' or self.image_source == 'realsense' or \
-            self.image_source == 'rosbag' or self.image_source == 'airsim', 'image_source setting error: should be gazebo or realsense'
+               self.image_source == 'rosbag' or self.image_source == 'airsim' or \
+               self.image_source == 'zedm', 'image_source setting error: should be gazebo or realsense'
 
         self.control_method = cfg.get('sim_setting', 'control_method')
         assert self.control_method == 'velocity' or self.control_method == 'position', \
@@ -208,6 +209,9 @@ class ModelEvalNode():
         elif self.image_source == 'realsense':
             self.sub_topic_depth_image = '/camera/aligned_depth_to_color/image_raw'
             rospy.Subscriber(self.sub_topic_depth_image, Image, callback=self._image_realsense_Cb, queue_size=10)
+        elif self.image_source == 'zedm':
+            self.sub_topic_depth_image = '/zedm/zed_node/depth/depth_registered'
+            rospy.Subscriber(self.sub_topic_depth_image, Image, callback=self._image_zedm_Cb, queue_size=10)
         elif self.image_source == 'rosbag':
             self.sub_topic_depth_image = '/camera/aligned_depth_to_color/image_raw/compressedDepth'
             rospy.Subscriber(self.sub_topic_depth_image, CompressedImage, callback=self._image_rosbag_Cb, queue_size=10)
@@ -327,6 +331,37 @@ class ModelEvalNode():
         image_gray_int = image_gray.astype(np.uint8)
         self._depth_image_gray = image_gray_int
 
+    def _image_zedm_Cb(self, msg):
+        # zedm图像处理
+        # 原始图像已经是深度信息（meter）
+        # 原始图像中存在nan和inf 需要进行处理
+        depth_image_msg = msg  # 32FC1 encoding  320 * 180
+        # get depth image in mm
+        try:
+            # transfer image from ros msg to opencv image encode F32C1
+            cv_image = self.bridge.imgmsg_to_cv2(depth_image_msg,
+                                                 desired_encoding=depth_image_msg.encoding)
+        except CvBridgeError as e:
+            print(e)
+
+        # rescale image to  80 60
+        image = np.array(cv_image, dtype=np.float32)
+        image_small = cv2.resize(image, (self.image_width, self.image_height), interpolation=cv2.INTER_NEAREST)
+
+        # deal with nan inf and 0
+        image_small[np.isnan(image_small)] = self.max_depth_meter
+        image_small[np.isinf(image_small)] = self.max_depth_meter
+        image_small[image_small == 0] = self.max_depth_meter
+
+        image_small_meter = np.clip(image_small, self.min_depth_meter, self.max_depth_meter)
+
+        self._depth_image_meter = np.copy(image_small_meter)
+
+        # get depth image in gray (0-255)
+        image_gray = self._depth_image_meter / self.max_depth_meter * 255
+        image_gray_int = image_gray.astype(np.uint8)
+        self._depth_image_gray = image_gray_int
+
     def _image_airsim_Cb(self, msg):
         data = msg
 
@@ -366,6 +401,8 @@ class ModelEvalNode():
             self._image_gazebo_Cb(image_msg)
         elif self.image_source == 'real':
             self._image_realsense_Cb(image_msg)
+        elif self.image_source == 'zedm':
+            self._image_zedm_Cb(image_msg)
         elif self.image_source == 'airsim':
             self._image_airsim_Cb(image_msg)
         else:
@@ -580,10 +617,8 @@ class ModelEvalNode():
             rospy.logerr("action num error: action num should be 2 or 3, now is {}".format(self.action_num))
 
         control_msg.yaw_rate = -action_smooth[-1]
-        
 
         # control_msg.yaw_rate = 1
-
         rospy.logdebug('action_final: {:.2f} {:.2f} {:.2f}'.format(control_msg.velocity.x, control_msg.velocity.z, math.degrees(control_msg.yaw_rate)))
 
         # publish setpoint marker
@@ -787,7 +822,7 @@ if __name__ == "__main__":
         # print(sys.path)
         rospy.init_node('model_eval', anonymous=True, log_level=rospy.DEBUG)
 
-        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/real_test_sb3/config/config_airsim.ini'
+        config_path = '/home/helei/catkin_py3/src/explainable_rl_ros/scripts/real_test_sb3/config/config_real.ini'
         node_me = ModelEvalNode(config_path)
         node_me.start_controller()
 
