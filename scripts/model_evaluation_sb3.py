@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2022-10-08 09:36:02
-LastEditTime: 2022-10-09 23:24:46
+LastEditTime: 2022-10-10 22:59:03
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -85,7 +85,7 @@ class ModelEvalNode():
         while not rospy.is_shutdown():
             # 1. get obs
             step = step + 1
-            # print(step)
+            print(step)
             obs = self.get_obs()
 
             # 2. get action
@@ -101,12 +101,12 @@ class ModelEvalNode():
             
             # record data for 200 steps
             
-            if step < 400 and record_data:
+            if step < 600 and record_data:
                 obs_list.append(obs)
                 # traj_list.append(pose)
                 action_list.append(action_real)
                 state_raw_list.append(self.state_feature_raw)
-            elif step == 400 and record_data:
+            elif step == 600 and record_data:
                 np.save('action_eval_ros', action_list)
                 np.save('state_eval_ros', state_raw_list)
                 np.save('obs_eval_ros', obs_list)
@@ -422,7 +422,7 @@ class ModelEvalNode():
         relative_pose_y = goal_pose.pose.position.y - current_pose.pose.position.y
         relative_pose_z = goal_pose.pose.position.z - current_pose.pose.position.z
         distance = math.sqrt(pow(relative_pose_x, 2) + pow(relative_pose_y, 2))
-        relative_yaw = self._get_relative_yaw(current_pose, goal_pose)
+        relative_yaw = -self._get_relative_yaw(current_pose, goal_pose)
 
         distance_norm = distance / self.goal_distance * 255
         vertical_distance_norm = (-relative_pose_z / self.max_vertical_difference / 2 + 0.5) * 255
@@ -570,13 +570,17 @@ class ModelEvalNode():
         control_msg.velocity.y = 0
 
         if self.action_num == 2:
-            control_msg.velocity.z = np.clip(self.state_feature_raw[1], -1, 1)
+            pose_z = self.pose_local.pose.position.z
+            print(pose_z)
+            z_error = 5 - pose_z
+            control_msg.velocity.z = z_error * 5
         elif self.action_num == 3:
             control_msg.velocity.z = action_smooth[1]
         else:
             rospy.logerr("action num error: action num should be 2 or 3, now is {}".format(self.action_num))
 
-        control_msg.yaw_rate = action_smooth[-1] * 0.6
+        control_msg.yaw_rate = -action_smooth[-1]
+        
 
         # control_msg.yaw_rate = 1
 
@@ -614,7 +618,7 @@ class ModelEvalNode():
         dy_body = 0
 
         current_yaw = self.get_current_yaw()
-        yaw_speed = action[-1]
+        yaw_speed = -action[-1]
         yaw_setpoint = current_yaw + yaw_speed
 
         dx_local, dy_local = self.point_transfer(dx_body, dy_body, -yaw_setpoint)
