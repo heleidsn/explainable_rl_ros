@@ -2,7 +2,7 @@
 '''
 Author: Lei He
 Date: 2022-10-08 09:36:02
-LastEditTime: 2022-10-10 22:59:03
+LastEditTime: 2022-10-13 17:10:32
 LastEditors: Please set LastEditors
 Description: ROS node pack for model evaluation in ros environment
 FilePath: /explainable_rl_ros/scripts/model_evaluation.py
@@ -364,7 +364,7 @@ class ModelEvalNode():
         rospy.logdebug('update state variables')
         if self.image_source == 'gazebo':
             self._image_gazebo_Cb(image_msg)
-        elif self.image_source == 'realsense':
+        elif self.image_source == 'real':
             self._image_realsense_Cb(image_msg)
         elif self.image_source == 'airsim':
             self._image_airsim_Cb(image_msg)
